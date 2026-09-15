@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padel Pro Point & Match Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PeerJS para Sincronização Remota Árbitro / TV -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        padel: {
+                            green: '#10b981',
+                            gold: '#f59e0b',
+                            blue: '#0284c7',
+                            dark: '#0f172a',
+                            court: '#0369a1',
+                            accent: '#ccff00'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .neon-glow { text-shadow: 0 0 12px rgba(204, 255, 0, 0.6); }
+        .score-card { background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); }
+        .active-serve { animation: pulse-glow 1.5s infinite alternate; }
+        @keyframes pulse-glow {
+            from { box-shadow: 0 0 5px #ccff00; }
+            to { box-shadow: 0 0 20px #ccff00; }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-padel-accent selection:text-black">
+
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-40">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex justify-between items-center flex-wrap gap-2">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-full bg-padel-accent flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-padel-accent/20">
+                    <i class="fa-solid fa-table-tennis-paddle-ball"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-lg leading-tight tracking-tight text-white flex items-center gap-2">
+                        PADEL<span class="text-padel-accent">PRO</span> TRACKER
+                    </h1>
+                    <p class="text-xs text-slate-400">Marcador & Controlo de Árbitro</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button id="syncModalBtn" onclick="toggleSyncModal()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all flex items-center gap-1.5 shadow">
+                    <i class="fa-solid fa-wifi"></i> <span id="syncStatusLabel">Ligar Árbitro / TV</span>
+                </button>
+                <button id="modeMatchBtn" onclick="switchTab('match')" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-padel-accent text-slate-950 transition-all shadow">
+                    Modo Jogo
+                </button>
+                <button id="modeAmericanoBtn" onclick="switchTab('americano')" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:text-white transition-all">
+                    Americano
+                </button>
+                <button id="settingsToggleBtn" onclick="toggleSettingsModal()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+                    <i class="fa-solid fa-gear text-lg"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-5xl w-full mx-auto px-4 py-4 flex flex-col gap-4">
+
+        <div id="matchTab" class="flex flex-col gap-4">
+            
+            <div class="bg-slate-900/80 backdrop-blur rounded-xl p-3 border border-slate-800 flex flex-wrap justify-between items-center gap-2 text-xs">
+                <div class="flex items-center gap-4 flex-wrap">
+                    <span class="flex items-center gap-1.5 text-slate-300">
+                        <i class="fa-solid fa-gavel text-padel-accent"></i> Regra: 
+                        <strong id="ruleRuleText" class="text-white">Ponto de Ouro</strong>
+                    </span>
+                    <span class="flex items-center gap-1.5 text-slate-300">
+                        <i class="fa-solid fa-trophy text-amber-400"></i> Formato: 
+                        <strong id="ruleSetsText" class="text-white">Melhor de 3 Sets (6 Jogos)</strong>
+                    </span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleAudio()" id="audioBtn" class="flex items-center gap-1 text-slate-400 hover:text-white bg-slate-800 px-2.5 py-1 rounded-md">
+                        <i id="audioIcon" class="fa-solid fa-volume-high text-padel-accent"></i> Árbitro de Voz
+                    </button>
+                    <button onclick="openResetModal()" class="text-red-400 hover:text-red-300 bg-red-950/40 border border-red-900/50 px-2 py-1 rounded-md">
+                        <i class="fa-solid fa-rotate-right"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <div class="score-card rounded-2xl p-4 sm:p-6 border border-slate-800 shadow-2xl relative overflow-hidden">
+                <div id="gameStatusBanner" class="hidden text-center py-1 px-4 mb-4 rounded-full font-bold text-xs uppercase tracking-widest transition-all">
+                    PONTO DE JOGO
+                </div>
+
+                <div class="grid grid-cols-12 items-center border-b border-slate-800 pb-4 mb-6">
+                    <div class="col-span-6 font-bold text-slate-400 text-xs uppercase tracking-wider">EQUIPAS & JOGADORES</div>
+                    <div class="col-span-4 flex justify-end gap-3 text-xs font-bold text-slate-400 uppercase tracking-wider pr-2">
+                        <span>S1</span>
+                        <span>S2</span>
+                        <span>S3</span>
+                    </div>
+                    <div class="col-span-2 text-right font-bold text-slate-400 text-xs uppercase tracking-wider">JOGOS</div>
+                </div>
+
+                <!-- LINHA EQUIPA A -->
+                <div class="grid grid-cols-12 items-center mb-6">
+                    <div class="col-span-6 flex items-center gap-3">
+                        <button onclick="cycleServer(1)" id="server1Indicator" title="Clique para mudar servidor da Equipa A" class="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-padel-accent hover:border-padel-accent transition-all flex-shrink-0">
+                            <i class="fa-solid fa-baseball"></i>
+                        </button>
+                        <div class="truncate">
+                            <span id="team1Display" class="font-extrabold text-base sm:text-lg text-white block truncate">Equipa A</span>
+                            <span id="team1PlayersDisplay" class="text-xs text-slate-400 block truncate">Jogador 1A / Jogador 2A</span>
+                            <span id="team1ServerLabel" class="text-[10px] text-padel-accent uppercase tracking-wider font-semibold hidden">A Servir: <span id="team1ServerName">---</span></span>
+                        </div>
+                    </div>
+
+                    <div class="col-span-4 flex justify-end gap-3 font-mono font-bold text-sm sm:text-base text-slate-300 pr-2">
+                        <span id="t1s1" class="w-6 text-center text-slate-500">-</span>
+                        <span id="t1s2" class="w-6 text-center text-slate-500">-</span>
+                        <span id="t1s3" class="w-6 text-center text-slate-500">-</span>
+                    </div>
+
+                    <div class="col-span-2 text-right font-mono font-black text-2xl text-slate-200" id="t1Games">0</div>
+                </div>
+
+                <!-- LINHA EQUIPA B -->
+                <div class="grid grid-cols-12 items-center">
+                    <div class="col-span-6 flex items-center gap-3">
+                        <button onclick="cycleServer(2)" id="server2Indicator" title="Clique para mudar servidor da Equipa B" class="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-600 hover:border-padel-accent transition-all flex-shrink-0">
+                            <i class="fa-solid fa-baseball"></i>
+                        </button>
+                        <div class="truncate">
+                            <span id="team2Display" class="font-extrabold text-base sm:text-lg text-white block truncate">Equipa B</span>
+                            <span id="team2PlayersDisplay" class="text-xs text-slate-400 block truncate">Jogador 1B / Jogador 2B</span>
+                            <span id="team2ServerLabel" class="text-[10px] text-padel-accent uppercase tracking-wider font-semibold hidden">A Servir: <span id="team2ServerName">---</span></span>
+                        </div>
+                    </div>
+
+                    <div class="col-span-4 flex justify-end gap-3 font-mono font-bold text-sm sm:text-base text-slate-300 pr-2">
+                        <span id="t2s1" class="w-6 text-center text-slate-500">-</span>
+                        <span id="t2s2" class="w-6 text-center text-slate-500">-</span>
+                        <span id="t2s3" class="w-6 text-center text-slate-500">-</span>
+                    </div>
+
+                    <div class="col-span-2 text-right font-mono font-black text-2xl text-slate-200" id="t2Games">0</div>
+                </div>
+
+                <!-- CAIXAS DE PONTOS GIGANTES -->
+                <div class="mt-8 pt-6 border-t border-slate-800/80 grid grid-cols-2 gap-4">
+                    <div class="bg-slate-900/90 rounded-2xl p-4 sm:p-6 border border-slate-800 text-center relative overflow-hidden flex flex-col items-center justify-center">
+                        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Pontos Equipa A</span>
+                        <span id="team1Points" class="font-mono font-black text-5xl sm:text-7xl text-padel-accent neon-glow">0</span>
+                    </div>
+                    <div class="bg-slate-900/90 rounded-2xl p-4 sm:p-6 border border-slate-800 text-center relative overflow-hidden flex flex-col items-center justify-center">
+                        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Pontos Equipa B</span>
+                        <span id="team2Points" class="font-mono font-black text-5xl sm:text-7xl text-padel-accent neon-glow">0</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mt-4">
+                    <button onclick="addPoint(1)" class="py-6 sm:py-8 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-xl sm:text-2xl rounded-2xl shadow-lg transition-all transform active:scale-95 flex flex-col items-center justify-center gap-1">
+                        <span>+ PONTO EQUIPA A</span>
+                        <span class="text-xs font-normal text-emerald-200">Clique ou Botão Remoto (Tecla 1 / ◄ / Vol+)</span>
+                    </button>
+
+                    <button onclick="addPoint(2)" class="py-6 sm:py-8 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-black text-xl sm:text-2xl rounded-2xl shadow-lg transition-all transform active:scale-95 flex flex-col items-center justify-center gap-1">
+                        <span>+ PONTO EQUIPA B</span>
+                        <span class="text-xs font-normal text-sky-200">Clique ou Botão Remoto (Tecla 2 / ► / Vol-)</span>
+                    </button>
+                </div>
+
+                <div class="flex items-center justify-between mt-4 gap-2 flex-wrap">
+                    <button onclick="undoPoint()" id="undoBtn" disabled class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 font-semibold text-xs rounded-xl flex items-center gap-2 transition-all">
+                        <i class="fa-solid fa-rotate-left"></i> Anular Ponto (Undo)
+                    </button>
+                    
+                    <div class="flex gap-2">
+                        <button onclick="tagStat('Winner')" class="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs rounded-xl border border-slate-700">
+                            + Winner
+                        </button>
+                        <button onclick="tagStat('Unforced Error')" class="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs rounded-xl border border-slate-700">
+                            + Erro
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-2 bg-slate-900 rounded-xl p-4 border border-slate-800">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-list-ol text-padel-accent"></i> Feed do Jogo
+                    </h3>
+                    <div id="matchLog" class="h-32 overflow-y-auto space-y-2 text-xs text-slate-300 pr-2">
+                        <div class="text-slate-500 italic">Jogo pronto. Clique em + PONTO ou no botão do comando para iniciar.</div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 rounded-xl p-4 border border-slate-800 flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-simple text-padel-accent"></i> Estatísticas
+                        </h3>
+                        <div class="space-y-2 text-xs">
+                            <div class="flex justify-between items-center text-slate-300">
+                                <span>Pontos Jogados:</span>
+                                <strong id="statTotalPoints" class="font-mono text-white">0</strong>
+                            </div>
+                            <div class="flex justify-between items-center text-slate-300">
+                                <span>Winners:</span>
+                                <strong id="statWinners" class="font-mono text-emerald-400">0</strong>
+                            </div>
+                            <div class="flex justify-between items-center text-slate-300">
+                                <span>Erros Não Forçados:</span>
+                                <strong id="statErrors" class="font-mono text-red-400">0</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <button onclick="exportMatchLog()" class="w-full mt-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-lg transition">
+                        <i class="fa-solid fa-download mr-1"></i> Descarregar Resumo
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <div id="americanoTab" class="hidden flex flex-col gap-4">
+            <div class="bg-slate-900 rounded-xl p-4 border border-slate-800">
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <div>
+                        <h2 class="font-bold text-base text-white">Torneio Social Americano</h2>
+                        <p class="text-xs text-slate-400">Pontuação fixa (ex: 24 ou 32 pontos totais por jogo)</p>
+                    </div>
+                    <button onclick="openAddPlayerModal()" class="px-3 py-1.5 bg-padel-accent text-slate-950 font-bold text-xs rounded-lg">
+                        + Adicionar Jogador
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6" id="americanoPlayersList">
+                    <!-- Jogadores gerados dinamicamente -->
+                </div>
+
+                <div class="border-t border-slate-800 pt-4">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Tabela de Classificação</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs text-slate-300">
+                            <thead class="bg-slate-800 text-slate-400 uppercase font-bold text-[10px]">
+                                <tr>
+                                    <th class="p-2.5">Pos.</th>
+                                    <th class="p-2.5">Nome do Jogador</th>
+                                    <th class="p-2.5 text-center">Jogos</th>
+                                    <th class="p-2.5 text-center">Pontos Marcados</th>
+                                </tr>
+                            </thead>
+                            <tbody id="americanoLeaderboard" class="divide-y divide-slate-800 font-mono">
+                                <!-- Classificação gerada dinamicamente -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- MODAL DE SINCRONIZAÇÃO ÁRBITRO / TV -->
+    <div id="syncModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-5">
+                <h2 class="font-extrabold text-lg text-white flex items-center gap-2">
+                    <i class="fa-solid fa-wifi text-indigo-400"></i> Sincronizar Árbitro / TV
+                </h2>
+                <button onclick="toggleSyncModal()" class="text-slate-400 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-5 text-xs">
+                <div class="bg-slate-800/80 p-4 rounded-xl border border-slate-700">
+                    <h3 class="font-bold text-white text-sm mb-1 flex items-center gap-2">
+                        <i class="fa-solid fa-tv text-padel-accent"></i> 1. Na TV do Campo (Modo Ecrã)
+                    </h3>
+                    <p class="text-slate-400 mb-3">Clique para gerar um código único e aguarde a ligação do telemóvel do árbitro.</p>
+                    <button onclick="startHostTVMode()" class="w-full py-2.5 bg-padel-accent text-slate-950 font-bold rounded-lg hover:bg-lime-400 transition">
+                        Ativar Modo Ecrã de Campo
+                    </button>
+                    <div id="tvCodeDisplay" class="hidden mt-3 p-3 bg-slate-950 rounded-lg text-center border border-padel-accent/40">
+                        <span class="text-slate-400 text-[10px] block uppercase font-bold">Código do Campo:</span>
+                        <span id="generatedCode" class="font-mono font-black text-2xl text-padel-accent tracking-widest">---</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800/80 p-4 rounded-xl border border-slate-700">
+                    <h3 class="font-bold text-white text-sm mb-1 flex items-center gap-2">
+                        <i class="fa-solid fa-mobile-screen-button text-sky-400"></i> 2. No Telemóvel do Árbitro
+                    </h3>
+                    <p class="text-slate-400 mb-3">Insira o código que aparece na TV do campo para assumir o controlo remoto.</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="courtCodeInput" placeholder="Ex: PADEL-482" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white uppercase text-center font-mono font-bold focus:outline-none focus:border-sky-400">
+                        <button onclick="connectAsReferee()" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg transition">
+                            Conectar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE CONFIGURAÇÃO DE JOGO E JOGADORES -->
+    <div id="settingsModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-5">
+                <h2 class="font-extrabold text-lg text-white">Configuração da Partida</h2>
+                <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4 text-xs">
+                <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 space-y-2">
+                    <span class="font-bold text-padel-accent uppercase text-[10px]">Equipa A (2 Jogadores)</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-slate-400 font-semibold mb-1">Jogador 1</label>
+                            <input type="text" id="inputTeam1P1" value="Jogador 1A" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-padel-accent">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-semibold mb-1">Jogador 2</label>
+                            <input type="text" id="inputTeam1P2" value="Jogador 2A" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-padel-accent">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 space-y-2">
+                    <span class="font-bold text-sky-400 uppercase text-[10px]">Equipa B (2 Jogadores)</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-slate-400 font-semibold mb-1">Jogador 1</label>
+                            <input type="text" id="inputTeam2P1" value="Jogador 1B" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-sky-400">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-semibold mb-1">Jogador 2</label>
+                            <input type="text" id="inputTeam2P2" value="Jogador 2B" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white focus:outline-none focus:border-sky-400">
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Regra de Deuce / Igualdades</label>
+                    <select id="selectRule" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-padel-accent">
+                        <option value="golden">Ponto de Ouro / Golden Point (1 Ponto Decisivo)</option>
+                        <option value="advantage">Vantagens (Sistema Tradicional de 2 pontos)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Modelo / Formato do Jogo</label>
+                    <select id="selectSets" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-padel-accent">
+                        <option value="3">Melhor de 3 Sets Normal (6 Jogos por Set)</option>
+                        <option value="1">Set Único Normal (6 Jogos por Set)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1">Formato do Set Decisivo (3º Set)</label>
+                    <select id="selectFinalSet" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-padel-accent">
+                        <option value="super">Super Tiebreak (Primeiro a 10 pontos)</option>
+                        <option value="standard">Set Completo Normal (Até 6 jogos)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end gap-2">
+                <button onclick="applySettings()" class="w-full py-3 bg-padel-accent text-slate-950 font-black text-sm rounded-xl shadow-lg hover:bg-lime-400 transition">
+                    Guardar e Aplicar Configurações
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE CONFIRMAÇÃO RESET -->
+    <div id="resetModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl">
+            <div class="w-12 h-12 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center mx-auto mb-4 text-xl">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h3 class="text-base font-bold text-white mb-2">Reiniciar Partida?</h3>
+            <p class="text-xs text-slate-400 mb-5">Esta ação vai apagar toda a pontuação e estatísticas do jogo atual.</p>
+            <div class="flex gap-2">
+                <button onclick="closeResetModal()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl">Cancelar</button>
+                <button onclick="confirmResetMatch()" class="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl">Reiniciar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE ADICIONAR JOGADOR AMERICANO -->
+    <div id="addPlayerModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <h3 class="text-base font-bold text-white mb-3">Novo Jogador</h3>
+            <input type="text" id="newPlayerNameInput" placeholder="Nome do Jogador" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white mb-4 focus:outline-none focus:border-padel-accent">
+            <div class="flex gap-2">
+                <button onclick="closeAddPlayerModal()" class="flex-1 py-2 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl">Cancelar</button>
+                <button onclick="confirmAddPlayer()" class="flex-1 py-2 bg-padel-accent text-slate-950 font-bold text-xs rounded-xl">Adicionar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-5 right-5 bg-padel-accent text-slate-950 font-bold px-4 py-3 rounded-xl shadow-2xl transition-all transform translate-y-20 opacity-0 z-50 text-xs flex items-center gap-2">
+        <i class="fa-solid fa-circle-check"></i>
+        <span id="toastMsg">Notificação</span>
+    </div>
+
+    <script>
+        let matchState = {
+            t1p1: "Jogador 1A",
+            t1p2: "Jogador 2A",
+            t2p1: "Jogador 1B",
+            t2p2: "Jogador 2B",
+            rule: "golden",
+            totalSets: 3,
+            finalSetFormat: "super",
+            currentSet: 0,
+            serverIdx: 0, // 0: T1P1, 1: T2P1, 2: T1P2, 3: T2P2
+            setsScore: [{ t1: 0, t2: 0 }, { t1: 0, t2: 0 }, { t1: 0, t2: 0 }],
+            p1: 0,
+            p2: 0,
+            isTiebreak: false,
+            tiebreakTarget: 7,
+            history: [],
+            winners: 0,
+            errors: 0,
+            matchOver: false,
+            audioEnabled: true
+        };
+
+        const pointLabels = ["0", "15", "30", "40", "AD"];
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        let peer = null;
+        let conn = null;
+
+        function getTeam1Name() { return `${matchState.t1p1} / ${matchState.t1p2}`; }
+        function getTeam2Name() { return `${matchState.t2p1} / ${matchState.t2p2}`; }
+
+        function getCurrentServerName() {
+            const servers = [matchState.t1p1, matchState.t2p1, matchState.t1p2, matchState.t2p2];
+            return servers[matchState.serverIdx] || matchState.t1p1;
+        }
+
+        function getServingTeam() {
+            return (matchState.serverIdx % 2 === 0) ? 1 : 2;
+        }
+
+        function playBeep(freq = 440, duration = 0.08) {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {}
+        }
+
+        function speak(text) {
+            if (!matchState.audioEnabled || !('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'pt-PT';
+            utterance.rate = 1.1;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function broadcastAction(action, payload = {}) {
+            if (conn && conn.open) {
+                conn.send({ action, payload });
+            }
+        }
+
+        function addPoint(team, isRemote = false) {
+            if (matchState.matchOver) {
+                showToast("Jogo concluído!");
+                return;
+            }
+
+            if (!isRemote) broadcastAction('ADD_POINT', { team });
+
+            saveStateSnapshot();
+            playBeep(team === 1 ? 523.25 : 659.25);
+            if (navigator.vibrate) navigator.vibrate(40);
+
+            if (matchState.isTiebreak) {
+                handleTiebreakPoint(team);
+            } else {
+                handleStandardPoint(team);
+            }
+
+            updateUI();
+        }
+
+        function handleStandardPoint(team) {
+            let p1 = matchState.p1;
+            let p2 = matchState.p2;
+
+            if (team === 1) p1++;
+            else p2++;
+
+            if (matchState.rule === 'golden') {
+                if (p1 >= 4) { winGame(1); return; }
+                else if (p2 >= 4) { winGame(2); return; }
+            } else {
+                if (p1 >= 3 && p2 >= 3) {
+                    if (p1 === p2) {
+                        matchState.p1 = 3; matchState.p2 = 3;
+                        speak("Igualdade"); logEvent("Igualdade"); return;
+                    } else if (p1 - p2 === 2) { winGame(1); return; }
+                    else if (p2 - p1 === 2) { winGame(2); return; }
+                    else if (p1 - p2 === 1) {
+                        matchState.p1 = 4; matchState.p2 = 3;
+                        speak("Vantagem Equipa A"); logEvent("Vantagem Equipa A"); return;
+                    } else if (p2 - p1 === 1) {
+                        matchState.p1 = 3; matchState.p2 = 4;
+                        speak("Vantagem Equipa B"); logEvent("Vantagem Equipa B"); return;
+                    }
+                } else if (p1 >= 4) { winGame(1); return; }
+                else if (p2 >= 4) { winGame(2); return; }
+            }
+
+            matchState.p1 = p1;
+            matchState.p2 = p2;
+            
+            const s1 = pointLabels[p1] || p1;
+            const s2 = pointLabels[p2] || p2;
+            if (p1 === 3 && p2 === 3 && matchState.rule === 'golden') {
+                speak("Ponto de Ouro");
+                logEvent("Ponto de Ouro!");
+            } else {
+                speak(`${s1} - ${s2}`);
+                logEvent(`Ponto para ${team === 1 ? 'Equipa A' : 'Equipa B'} (${s1}-${s2})`);
+            }
+        }
+
+        function handleTiebreakPoint(team) {
+            if (team === 1) matchState.p1++;
+            else matchState.p2++;
+
+            const target = matchState.tiebreakTarget;
+            const p1 = matchState.p1;
+            const p2 = matchState.p2;
+
+            logEvent(`Ponto Tiebreak: Equipa A ${p1} - ${p2} Equipa B`);
+            speak(`${p1} - ${p2}`);
+
+            const totalTBPoints = p1 + p2;
+            if (totalTBPoints % 2 === 1) switchServer();
+
+            if ((p1 >= target || p2 >= target) && Math.abs(p1 - p2) >= 2) {
+                if (p1 > p2) winGame(1);
+                else winGame(2);
+            }
+        }
+
+        function winGame(team) {
+            const setIdx = matchState.currentSet;
+            if (team === 1) matchState.setsScore[setIdx].t1++;
+            else matchState.setsScore[setIdx].t2++;
+
+            matchState.p1 = 0;
+            matchState.p2 = 0;
+
+            const t1Games = matchState.setsScore[setIdx].t1;
+            const t2Games = matchState.setsScore[setIdx].t2;
+
+            speak(`Jogo ${team === 1 ? 'Equipa A' : 'Equipa B'}`);
+            logEvent(`JOGO ${team === 1 ? 'EQUIPA A' : 'EQUIPA B'}! (${t1Games}-${t2Games})`);
+
+            switchServer();
+            checkSetStatus(setIdx);
+        }
+
+        function checkSetStatus(setIdx) {
+            const t1 = matchState.setsScore[setIdx].t1;
+            const t2 = matchState.setsScore[setIdx].t2;
+
+            if (setIdx === 2 && matchState.finalSetFormat === 'super') {
+                if (t1 >= 1 || t2 >= 1) { completeSet(t1 > t2 ? 1 : 2); return; }
+            }
+
+            if (t1 === 6 && t2 === 6 && !matchState.isTiebreak) {
+                matchState.isTiebreak = true;
+                matchState.tiebreakTarget = (setIdx === 2 && matchState.finalSetFormat === 'super') ? 10 : 7;
+                speak(`Tiebreak a ${matchState.tiebreakTarget} pontos`);
+                logEvent(`TIEBREAK INICIADO (${matchState.tiebreakTarget} Pts)`);
+                return;
+            }
+
+            if ((t1 >= 6 || t2 >= 6) && Math.abs(t1 - t2) >= 2 || (t1 === 7 || t2 === 7)) {
+                completeSet(t1 > t2 ? 1 : 2);
+            } else {
+                matchState.isTiebreak = false;
+            }
+        }
+
+        function completeSet(winnerTeam) {
+            matchState.isTiebreak = false;
+            const setNum = matchState.currentSet + 1;
+            speak(`Set ${setNum} para ${winnerTeam === 1 ? 'Equipa A' : 'Equipa B'}`);
+            logEvent(`SET ${setNum} GANHO POR ${winnerTeam === 1 ? 'EQUIPA A' : 'EQUIPA B'}`);
+
+            let setsT1 = 0, setsT2 = 0;
+            matchState.setsScore.forEach(s => {
+                if (s.t1 > s.t2 && (s.t1 >= 6 || s.t1 === 7 || (s.t1 === 1 && matchState.finalSetFormat === 'super'))) setsT1++;
+                if (s.t2 > s.t1 && (s.t2 >= 6 || s.t2 === 7 || (s.t2 === 1 && matchState.finalSetFormat === 'super'))) setsT2++;
+            });
+
+            const setsNeeded = Math.ceil(matchState.totalSets / 2);
+
+            if (setsT1 >= setsNeeded || setsT2 >= setsNeeded) {
+                matchState.matchOver = true;
+                const matchWinner = setsT1 > setsT2 ? getTeam1Name() : getTeam2Name();
+                speak(`Jogo concluído! Vencedores: ${matchWinner}`);
+                logEvent(`🏆 VITÓRIA DO JOGO PARA ${matchWinner.toUpperCase()}!`);
+                showToast(`Vitória de ${matchWinner}!`);
+            } else {
+                matchState.currentSet++;
+            }
+        }
+
+        function switchServer() { 
+            matchState.serverIdx = (matchState.serverIdx + 1) % 4; 
+        }
+
+        function cycleServer(team) {
+            if (team === 1) {
+                matchState.serverIdx = (matchState.serverIdx === 0) ? 2 : 0;
+            } else {
+                matchState.serverIdx = (matchState.serverIdx === 1) ? 3 : 1;
+            }
+            broadcastAction('SET_SERVER', { serverIdx: matchState.serverIdx });
+            updateUI();
+            showToast(`Servidor: ${getCurrentServerName()}`);
+        }
+
+        function updateUI() {
+            document.getElementById('team1Display').innerText = `Equipa A`;
+            document.getElementById('team1PlayersDisplay').innerText = `${matchState.t1p1} / ${matchState.t1p2}`;
+            document.getElementById('team2Display').innerText = `Equipa B`;
+            document.getElementById('team2PlayersDisplay').innerText = `${matchState.t2p1} / ${matchState.t2p2}`;
+
+            document.getElementById('ruleRuleText').innerText = matchState.rule === 'golden' ? 'Ponto de Ouro' : 'Vantagens';
+            document.getElementById('ruleSetsText').innerText = `Melhor de ${matchState.totalSets} Sets (6 Jogos/Set)`;
+
+            const curSet = matchState.currentSet;
+            document.getElementById('t1Games').innerText = matchState.setsScore[curSet].t1;
+            document.getElementById('t2Games').innerText = matchState.setsScore[curSet].t2;
+
+            for (let i = 0; i < 3; i++) {
+                const s = matchState.setsScore[i];
+                const t1El = document.getElementById(`t1s${i+1}`);
+                const t2El = document.getElementById(`t2s${i+1}`);
+
+                if (i <= matchState.currentSet) {
+                    t1El.innerText = s.t1;
+                    t2El.innerText = s.t2;
+                    t1El.className = i === curSet ? "w-6 text-center text-padel-accent font-black" : "w-6 text-center text-slate-300";
+                    t2El.className = i === curSet ? "w-6 text-center text-padel-accent font-black" : "w-6 text-center text-slate-300";
+                } else {
+                    t1El.innerText = "-"; t2El.innerText = "-";
+                    t1El.className = "w-6 text-center text-slate-600";
+                    t2El.className = "w-6 text-center text-slate-600";
+                }
+            }
+
+            if (matchState.isTiebreak) {
+                document.getElementById('team1Points').innerText = matchState.p1;
+                document.getElementById('team2Points').innerText = matchState.p2;
+            } else {
+                document.getElementById('team1Points').innerText = pointLabels[matchState.p1] || "0";
+                document.getElementById('team2Points').innerText = pointLabels[matchState.p2] || "0";
+            }
+
+            const s1Ind = document.getElementById('server1Indicator');
+            const s2Ind = document.getElementById('server2Indicator');
+            const s1Lbl = document.getElementById('team1ServerLabel');
+            const s2Lbl = document.getElementById('team2ServerLabel');
+            const s1Name = document.getElementById('team1ServerName');
+            const s2Name = document.getElementById('team2ServerName');
+
+            const activeTeam = getServingTeam();
+            const activeServerName = getCurrentServerName();
+
+            if (activeTeam === 1) {
+                s1Ind.className = "w-7 h-7 rounded-full bg-padel-accent text-slate-950 font-bold flex items-center justify-center text-xs active-serve transition-all flex-shrink-0";
+                s2Ind.className = "w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-600 transition-all flex-shrink-0";
+                s1Lbl.classList.remove('hidden'); s2Lbl.classList.add('hidden');
+                s1Name.innerText = activeServerName;
+            } else {
+                s2Ind.className = "w-7 h-7 rounded-full bg-padel-accent text-slate-950 font-bold flex items-center justify-center text-xs active-serve transition-all flex-shrink-0";
+                s1Ind.className = "w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs text-slate-600 transition-all flex-shrink-0";
+                s2Lbl.classList.remove('hidden'); s1Lbl.classList.add('hidden');
+                s2Name.innerText = activeServerName;
+            }
+
+            const banner = document.getElementById('gameStatusBanner');
+            if (matchState.isTiebreak) {
+                banner.innerText = `TIEBREAK (PRIMEIRO A ${matchState.tiebreakTarget} PONTOS)`;
+                banner.className = "block text-center py-1.5 px-4 mb-4 rounded-full font-extrabold text-xs uppercase tracking-widest bg-amber-500/20 text-amber-300 border border-amber-500/40";
+            } else if (matchState.p1 === 3 && matchState.p2 === 3) {
+                if (matchState.rule === 'golden') {
+                    banner.innerText = "PONTO DE OURO - DECISIVO";
+                    banner.className = "block text-center py-1.5 px-4 mb-4 rounded-full font-extrabold text-xs uppercase tracking-widest bg-padel-accent/20 text-padel-accent border border-padel-accent/40 animate-pulse";
+                } else {
+                    banner.innerText = "DEUCE / IGUALDADE";
+                    banner.className = "block text-center py-1.5 px-4 mb-4 rounded-full font-extrabold text-xs uppercase tracking-widest bg-blue-500/20 text-blue-300 border border-blue-500/40";
+                }
+            } else {
+                banner.className = "hidden";
+            }
+
+            document.getElementById('undoBtn').disabled = matchState.history.length === 0;
+            document.getElementById('statTotalPoints').innerText = matchState.history.length;
+            document.getElementById('statWinners').innerText = matchState.winners;
+            document.getElementById('statErrors').innerText = matchState.errors;
+        }
+
+        function saveStateSnapshot() {
+            matchState.history.push(JSON.parse(JSON.stringify({
+                setsScore: matchState.setsScore,
+                currentSet: matchState.currentSet,
+                p1: matchState.p1,
+                p2: matchState.p2,
+                serverIdx: matchState.serverIdx,
+                isTiebreak: matchState.isTiebreak,
+                tiebreakTarget: matchState.tiebreakTarget,
+                matchOver: matchState.matchOver,
+                winners: matchState.winners,
+                errors: matchState.errors
+            })));
+        }
+
+        function undoPoint(isRemote = false) {
+            if (matchState.history.length === 0) return;
+            if (!isRemote) broadcastAction('UNDO');
+
+            const prev = matchState.history.pop();
+            matchState.setsScore = prev.setsScore;
+            matchState.currentSet = prev.currentSet;
+            matchState.p1 = prev.p1;
+            matchState.p2 = prev.p2;
+            matchState.serverIdx = prev.serverIdx;
+            matchState.isTiebreak = prev.isTiebreak;
+            matchState.tiebreakTarget = prev.tiebreakTarget;
+            matchState.matchOver = prev.matchOver;
+            matchState.winners = prev.winners;
+            matchState.errors = prev.errors;
+
+            logEvent("↩ Último ponto anulado");
+            updateUI();
+            showToast("Ponto anulado");
+        }
+
+        function applySettings() {
+            matchState.t1p1 = document.getElementById('inputTeam1P1').value.trim() || "Jogador 1A";
+            matchState.t1p2 = document.getElementById('inputTeam1P2').value.trim() || "Jogador 2A";
+            matchState.t2p1 = document.getElementById('inputTeam2P1').value.trim() || "Jogador 1B";
+            matchState.t2p2 = document.getElementById('inputTeam2P2').value.trim() || "Jogador 2B";
+            matchState.rule = document.getElementById('selectRule').value;
+            matchState.totalSets = parseInt(document.getElementById('selectSets').value);
+            matchState.finalSetFormat = document.getElementById('selectFinalSet').value;
+
+            broadcastAction('SETTINGS_UPDATE', {
+                t1p1: matchState.t1p1, t1p2: matchState.t1p2,
+                t2p1: matchState.t2p1, t2p2: matchState.t2p2,
+                rule: matchState.rule, totalSets: matchState.totalSets,
+                finalSetFormat: matchState.finalSetFormat
+            });
+
+            toggleSettingsModal();
+            updateUI();
+            showToast("Configurações do jogo aplicadas!");
+        }
+
+        function tagStat(type) {
+            if (type === 'Winner') matchState.winners++;
+            if (type === 'Unforced Error') matchState.errors++;
+            logEvent(`Estatística: ${type}`);
+            updateUI();
+            showToast(`${type} registado`);
+        }
+
+        function logEvent(msg) {
+            const feed = document.getElementById('matchLog');
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const item = document.createElement('div');
+            item.className = "flex items-start gap-2 border-l-2 border-padel-accent pl-2 py-0.5";
+            item.innerHTML = `<span class="text-slate-500 text-[10px] font-mono">${time}</span> <span>${msg}</span>`;
+            
+            if (feed.children.length === 1 && feed.children[0].classList.contains('italic')) {
+                feed.innerHTML = '';
+            }
+            feed.prepend(item);
+        }
+
+        function toggleSettingsModal() { document.getElementById('settingsModal').classList.toggle('hidden'); }
+        function toggleSyncModal() { document.getElementById('syncModal').classList.toggle('hidden'); }
+        function openResetModal() { document.getElementById('resetModal').classList.remove('hidden'); }
+        function closeResetModal() { document.getElementById('resetModal').classList.add('hidden'); }
+
+        function confirmResetMatch() {
+            matchState.setsScore = [{t1:0,t2:0},{t1:0,t2:0},{t1:0,t2:0}];
+            matchState.currentSet = 0;
+            matchState.p1 = 0; matchState.p2 = 0;
+            matchState.isTiebreak = false;
+            matchState.history = []; matchState.winners = 0; matchState.errors = 0;
+            matchState.matchOver = false;
+            document.getElementById('matchLog').innerHTML = '<div class="text-slate-500 italic">Jogo reiniciado. Clique em + PONTO para começar.</div>';
+            closeResetModal();
+            updateUI();
+            showToast("Jogo reiniciado!");
+        }
+
+        function toggleAudio() {
+            matchState.audioEnabled = !matchState.audioEnabled;
+            const icon = document.getElementById('audioIcon');
+            if (matchState.audioEnabled) {
+                icon.className = "fa-solid fa-volume-high text-padel-accent";
+                showToast("Árbitro de Voz Ativo");
+            } else {
+                icon.className = "fa-solid fa-volume-xmark text-slate-500";
+                showToast("Árbitro de Voz Silenciado");
+            }
+        }
+
+        /* MOTOR DE SINCRONIZAÇÃO PEERJS (TV <-> TELEMÓVEL) */
+        function startHostTVMode() {
+            const randomCode = "PADEL-" + Math.floor(100 + Math.random() * 900);
+            peer = new Peer(randomCode);
+
+            peer.on('open', (id) => {
+                document.getElementById('generatedCode').innerText = id;
+                document.getElementById('tvCodeDisplay').classList.remove('hidden');
+                document.getElementById('syncStatusLabel').innerText = "TV: " + id;
+                showToast("Modo TV Ativo! Código: " + id);
+            });
+
+            peer.on('connection', (c) => {
+                conn = c;
+                showToast("Árbitro conectado!");
+                document.getElementById('syncStatusLabel').innerText = "Árbitro Conectado";
+                toggleSyncModal();
+
+                conn.on('data', (data) => {
+                    if (data.action === 'ADD_POINT') addPoint(data.payload.team, true);
+                    if (data.action === 'UNDO') undoPoint(true);
+                    if (data.action === 'SET_SERVER') {
+                        matchState.serverIdx = data.payload.serverIdx;
+                        updateUI();
+                    }
+                    if (data.action === 'SETTINGS_UPDATE') {
+                        Object.assign(matchState, data.payload);
+                        updateUI();
+                    }
+                });
+            });
+        }
+
+        function connectAsReferee() {
+            const code = document.getElementById('courtCodeInput').value.trim().toUpperCase();
+            if (!code) {
+                showToast("Insira o código do campo");
+                return;
+            }
+
+            peer = new Peer();
+            peer.on('open', () => {
+                conn = peer.connect(code);
+                conn.on('open', () => {
+                    document.getElementById('syncStatusLabel').innerText = "Comando Ativo";
+                    showToast("Conectado à TV do campo!");
+                    toggleSyncModal();
+                });
+            });
+        }
+
+        function switchTab(tab) {
+            const matchTab = document.getElementById('matchTab');
+            const americanoTab = document.getElementById('americanoTab');
+            const btnM = document.getElementById('modeMatchBtn');
+            const btnA = document.getElementById('modeAmericanoBtn');
+
+            if (tab === 'match') {
+                matchTab.classList.remove('hidden');
+                americanoTab.classList.add('hidden');
+                btnM.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-padel-accent text-slate-950 transition-all shadow";
+                btnA.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:text-white transition-all";
+            } else {
+                americanoTab.classList.remove('hidden');
+                matchTab.classList.add('hidden');
+                btnA.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-padel-accent text-slate-950 transition-all shadow";
+                btnM.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:text-white transition-all";
+                renderAmericano();
+            }
+        }
+
+        let americanoPlayers = [
+            { id: 1, name: "Carlos", played: 0, points: 0 },
+            { id: 2, name: "Alejandro", played: 0, points: 0 },
+            { id: 3, name: "Marta", played: 0, points: 0 },
+            { id: 4, name: "Sofia", played: 0, points: 0 }
+        ];
+
+        function renderAmericano() {
+            const container = document.getElementById('americanoPlayersList');
+            container.innerHTML = '';
+
+            americanoPlayers.forEach(p => {
+                const card = document.createElement('div');
+                card.className = "bg-slate-800/80 p-3 rounded-xl border border-slate-700 flex justify-between items-center";
+                card.innerHTML = `
+                    <div>
+                        <span class="font-bold text-sm text-white block">${p.name}</span>
+                        <span class="text-[10px] text-slate-400">Total Pontos: ${p.points}</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="addAmericanoPoints(${p.id}, 1)" class="px-2 py-1 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded font-bold text-xs">+1</button>
+                        <button onclick="addAmericanoPoints(${p.id}, 5)" class="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-bold text-xs">+5</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            renderLeaderboard();
+        }
+
+        function openAddPlayerModal() { document.getElementById('addPlayerModal').classList.remove('hidden'); }
+        function closeAddPlayerModal() { document.getElementById('addPlayerModal').classList.add('hidden'); }
+
+        function confirmAddPlayer() {
+            const input = document.getElementById('newPlayerNameInput');
+            const name = input.value.trim();
+            if (name) {
+                americanoPlayers.push({ id: Date.now(), name: name, played: 0, points: 0 });
+                input.value = '';
+                closeAddPlayerModal();
+                renderAmericano();
+                showToast("Jogador adicionado!");
+            }
+        }
+
+        function addAmericanoPoints(id, pts) {
+            const p = americanoPlayers.find(x => x.id === id);
+            if (p) { p.points += pts; p.played += 1; renderAmericano(); }
+        }
+
+        function renderLeaderboard() {
+            const tbody = document.getElementById('americanoLeaderboard');
+            tbody.innerHTML = '';
+            const sorted = [...americanoPlayers].sort((a,b) => b.points - a.points);
+            sorted.forEach((p, idx) => {
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-800/40";
+                row.innerHTML = `
+                    <td class="p-2.5 font-bold text-padel-accent">#${idx+1}</td>
+                    <td class="p-2.5 font-sans font-semibold text-white">${p.name}</td>
+                    <td class="p-2.5 text-center">${p.played}</td>
+                    <td class="p-2.5 text-center font-bold text-emerald-400">${p.points}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function exportMatchLog() {
+            const text = `RELATÓRIO DE JOGO PADEL\n--------------------\nEquipas: ${getTeam1Name()} vs ${getTeam2Name()}\nFormato: Melhor de ${matchState.totalSets} Sets (${matchState.rule === 'golden' ? 'Ponto de Ouro' : 'Vantagens'})\nResultado: ${matchState.setsScore.map(s => `${s.t1}-${s.t2}`).join(', ')}\nPontos Totais: ${matchState.history.length}\nWinners: ${matchState.winners}\nErros Não Forçados: ${matchState.errors}`;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Padel_Match_Resumo_${Date.now()}.txt`;
+            a.click();
+            showToast("Resumo descarregado!");
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 2500);
+        }
+
+        window.onload = function() {
+            updateUI();
+
+            window.addEventListener('keydown', function(e) {
+                if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+                const key = e.key.toLowerCase();
+                const code = e.code;
+
+                if (['1', 'a', 'arrowleft', 'pageup', 'audiovolumeup'].includes(key) || code === 'VolumeUp') {
+                    e.preventDefault();
+                    addPoint(1);
+                }
+                if (['2', 'b', 'arrowright', 'pagedown', 'audiovolumedown'].includes(key) || code === 'VolumeDown') {
+                    e.preventDefault();
+                    addPoint(2);
+                }
+                if (key === 'z' || key === 'backspace') {
+                    e.preventDefault();
+                    undoPoint();
+                }
+            });
+        };
+    </script>
+</body>
+</html>
