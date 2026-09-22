@@ -67,7 +67,7 @@
                 <button id="modeAmericanoBtn" onclick="switchTab('americano')" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300 hover:text-white transition-all">
                     Americano
                 </button>
-                <button id="settingsToggleBtn" onclick="toggleSettingsModal()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+                <button onclick="openStreamPanel()" class="px-3 py-2 rounded-lg bg-sky-600 text-white text-xs font-bold">Stream / OBS</button><button onclick="toggleSettingsModal()" class="px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-bold">Nomes dos jogadores</button><button id="settingsToggleBtn" onclick="toggleSettingsModal()" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
                     <i class="fa-solid fa-gear text-lg"></i>
                 </button>
             </div>
@@ -489,11 +489,7 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        function broadcastAction(action, payload = {}) {
-            if (conn && conn.open) {
-                conn.send({ action, payload });
-            }
-        }
+        function broadcastAction() { /* State is broadcast by the authoritative host. */ }
 
         function addPoint(team, isRemote = false) {
             if (matchState.matchOver) {
@@ -811,7 +807,7 @@
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const item = document.createElement('div');
             item.className = "flex items-start gap-2 border-l-2 border-padel-accent pl-2 py-0.5";
-            item.innerHTML = `<span class="text-slate-500 text-[10px] font-mono">${time}</span> <span>${msg}</span>`;
+            item.textContent = time + ' ' + msg;
             
             if (feed.children.length === 1 && feed.children[0].classList.contains('italic')) {
                 feed.innerHTML = '';
@@ -850,56 +846,6 @@
         }
 
         /* MOTOR DE SINCRONIZAÇÃO PEERJS (TV <-> TELEMÓVEL) */
-        function startHostTVMode() {
-            const randomCode = "PADEL-" + Math.floor(100 + Math.random() * 900);
-            peer = new Peer(randomCode);
-
-            peer.on('open', (id) => {
-                document.getElementById('generatedCode').innerText = id;
-                document.getElementById('tvCodeDisplay').classList.remove('hidden');
-                document.getElementById('syncStatusLabel').innerText = "TV: " + id;
-                showToast("Modo TV Ativo! Código: " + id);
-            });
-
-            peer.on('connection', (c) => {
-                conn = c;
-                showToast("Árbitro conectado!");
-                document.getElementById('syncStatusLabel').innerText = "Árbitro Conectado";
-                toggleSyncModal();
-
-                conn.on('data', (data) => {
-                    if (data.action === 'ADD_POINT') addPoint(data.payload.team, true);
-                    if (data.action === 'UNDO') undoPoint(true);
-                    if (data.action === 'SET_SERVER') {
-                        matchState.serverIdx = data.payload.serverIdx;
-                        updateUI();
-                    }
-                    if (data.action === 'SETTINGS_UPDATE') {
-                        Object.assign(matchState, data.payload);
-                        updateUI();
-                    }
-                });
-            });
-        }
-
-        function connectAsReferee() {
-            const code = document.getElementById('courtCodeInput').value.trim().toUpperCase();
-            if (!code) {
-                showToast("Insira o código do campo");
-                return;
-            }
-
-            peer = new Peer();
-            peer.on('open', () => {
-                conn = peer.connect(code);
-                conn.on('open', () => {
-                    document.getElementById('syncStatusLabel').innerText = "Comando Ativo";
-                    showToast("Conectado à TV do campo!");
-                    toggleSyncModal();
-                });
-            });
-        }
-
         function switchTab(tab) {
             const matchTab = document.getElementById('matchTab');
             const americanoTab = document.getElementById('americanoTab');
@@ -1029,5 +975,155 @@
             });
         };
     </script>
+
+<style>
+#streamOverlay {display:none;width:610px;max-width:100%;font-family:Inter,Arial,sans-serif;color:#fff;border-radius:12px;overflow:hidden;background:rgba(8,22,39,.96);box-shadow:0 6px 24px #0004}
+#streamOverlay table{border-collapse:collapse;width:100%;table-layout:fixed}
+#streamOverlay th{font-size:13px;letter-spacing:1px;color:#b8c6d8;padding:10px 8px;font-weight:600}
+#streamOverlay th:first-child{width:360px;text-align:left;padding-left:18px}
+#streamOverlay td{border-top:1px solid #25354a;text-align:center;font-size:24px;font-weight:750;padding:12px 8px}
+#streamOverlay .names{text-align:left;font-size:19px;line-height:1.4;padding-left:18px;overflow-wrap:anywhere}
+#streamOverlay .points{color:#ccff00;background:#182e39;font-size:30px}
+#streamOverlay .serve{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:#ccff00}
+#streamOverlay .not-serving{background:transparent}
+#streamConnection {font-size:11px;padding:5px 18px;color:#fbbf24;background:#102237}
+body.overlay-mode{background:transparent!important;min-height:0!important;display:block!important;margin:0;padding:24px}
+body.overlay-mode > :not(#streamOverlay):not(script):not(style){display:none!important}
+body.overlay-mode #streamOverlay{display:block}
+#streamPanel{position:fixed;inset:0;z-index:100;background:#020617e8;padding:24px;overflow:auto;color:white;font:15px Inter,Arial,sans-serif}
+#streamPanel[hidden]{display:none}
+#streamPanel section{max-width:660px;margin:30px auto;background:#0f172a;padding:26px;border:1px solid #334155;border-radius:18px}
+#streamPanel input{display:block;width:100%;padding:10px;margin:8px 0 18px;background:#020617;border:1px solid #475569;border-radius:6px;color:white}
+#streamPanel button{padding:10px 16px;background:#334155;border-radius:7px;margin:5px 5px 5px 0}
+#streamPanel p{margin:14px 0;line-height:1.6}
+</style>
+<div id="streamOverlay" aria-label="Live padel scoreboard">
+<table><thead><tr><th id="overlayTitle">PADEL LIVE · CAMPO 1</th><th>S1</th><th>S2</th><th>S3</th><th>PTS</th></tr></thead><tbody id="overlayRows"></tbody></table>
+<div id="streamConnection" hidden></div>
+</div>
+<div id="streamPanel" hidden><section>
+<h2 style="font-size:24px;font-weight:800">O seu marcador na transmissão</h2>
+<p>1. Neste computador, ative o modo ecrã. Mantenha esta página aberta durante o jogo.</p>
+<button onclick="startHostTVMode()">Ativar modo ecrã</button>
+<p id="streamHostStatus">Aguardando ativação…</p>
+<label>Nome do campo<input id="courtLabel" maxlength="35" value="CAMPO 1" onchange="setCourtLabel(this.value)"></label>
+<p>2. No telemóvel, abra o mesmo site → Ligar Árbitro / TV → introduza o código acima. Ligue antes de alterar nomes ou pontos.</p>
+<p>3. No OBS: Fontes → + → Navegador. Cole este URL; largura 680, altura 300. Posicione no canto superior esquerdo. Deixe desativada a opção de encerrar a fonte quando não estiver visível.</p>
+<input id="overlayUrl" readonly aria-label="OBS overlay URL" placeholder="O URL aparece depois de ativar o modo ecrã">
+<button onclick="copyOverlayUrl()">Copiar URL OBS</button><button onclick="previewOverlay()">Pré-visualizar</button>
+<p style="font-size:12px;color:#94a3b8">Publique este ficheiro como index.html no seu site para ligar o telemóvel e o OBS. O ficheiro local permite experimentar a interface. A ligação remota requer internet. Teste no clube antes do torneio.</p>
+<button onclick="document.getElementById('streamPanel').hidden=true">Fechar</button>
+</section></div>
+<script>
+// One authoritative match lives on the host; controllers request changes and
+// receive full snapshots. Reconnecting clients never replay stale local scores.
+const streamParams=new URLSearchParams(location.search);
+const overlayMode=streamParams.get('view')==='overlay';
+let streamRole=overlayMode?'viewer':'host', streamRoom='', streamReady=false;
+let streamClients=new Set(), streamApplying=false, streamRetry=null;
+const storedStateKey='padel-stream-match-v2';
+if(overlayMode) document.body.classList.add('overlay-mode');
+else { try {const saved=JSON.parse(localStorage.getItem(storedStateKey));if(saved&&Array.isArray(saved.setsScore)&&saved.setsScore.length===3)matchState={...matchState,...saved};}catch(e){} }
+matchState.courtLabel=matchState.courtLabel||'CAMPO 1';
+function renderOverlay(){
+ document.getElementById('overlayTitle').textContent='PADEL LIVE · '+matchState.courtLabel;
+ const rows=document.getElementById('overlayRows');rows.replaceChildren();
+ for(let team=1;team<=2;team++){
+  const tr=document.createElement('tr'),names=document.createElement('td');names.className='names';
+  const dot=document.createElement('span');dot.className='serve'+(getServingTeam()===team?'':' not-serving');
+  names.append(dot,document.createTextNode(matchState['t'+team+'p1']),document.createElement('br'),document.createTextNode(matchState['t'+team+'p2']));tr.append(names);
+  for(let set=0;set<3;set++){const cell=document.createElement('td');cell.textContent=set<=matchState.currentSet?matchState.setsScore[set]['t'+team]:'–';tr.append(cell);}
+  const points=document.createElement('td');points.className='points';points.textContent=matchState.matchOver?'–':(matchState.isTiebreak?matchState['p'+team]:pointLabels[matchState['p'+team]]);tr.append(points);rows.append(tr);
+ }
+}
+function sendSnapshot(c){if(c.open)c.send({type:'STATE',state:JSON.parse(JSON.stringify(matchState))});}
+const baseUpdateUI=updateUI;
+updateUI=function(){baseUpdateUI();renderOverlay();if(streamRole==='host'&&!streamApplying){try{localStorage.setItem(storedStateKey,JSON.stringify(matchState));}catch(e){}streamClients.forEach(sendSnapshot);}};
+const baseSettingsToggle=toggleSettingsModal;
+toggleSettingsModal=function(){
+ for(const [id,key] of [['inputTeam1P1','t1p1'],['inputTeam1P2','t1p2'],['inputTeam2P1','t2p1'],['inputTeam2P2','t2p2'],['selectRule','rule'],['selectSets','totalSets'],['selectFinalSet','finalSetFormat']])document.getElementById(id).value=matchState[key];
+ baseSettingsToggle();
+};
+const commandFns={addPoint,undoPoint,cycleServer,confirmResetMatch,tagStat};
+function requestCommand(name,args){
+ if(streamRole==='viewer')return;
+ if(streamRole==='controller'){
+  if(!conn||!conn.open||!streamReady){showToast('Sem ligação. Reconecte antes de pontuar.');return;}
+  conn.send({type:'COMMAND',name,args});
+ }else executeCommand(name,args);
+}
+function executeCommand(name,args){
+ if(!Array.isArray(args))return;
+ if(name==='settings'){
+  const p=args[0];if(!p)return;
+  for(const key of ['t1p1','t1p2','t2p1','t2p2'])if(typeof p[key]==='string')matchState[key]=p[key].trim().slice(0,60)||'Jogador';
+  // Rules can only change before the first scored point.
+  if(!matchState.history.length){if(['golden','advantage'].includes(p.rule))matchState.rule=p.rule;if([1,3,5].includes(p.totalSets)&&p.totalSets<=3)matchState.totalSets=p.totalSets;if(['super','standard'].includes(p.finalSetFormat))matchState.finalSetFormat=p.finalSetFormat;}
+  updateUI();return;
+ }
+ if(name==='court'){matchState.courtLabel=String(args[0]||'CAMPO 1').slice(0,35);updateUI();return;}
+ if(!Object.hasOwn(commandFns,name))return;
+ if(['addPoint','cycleServer'].includes(name)&&![1,2].includes(args[0]))return;
+ commandFns[name](...args);
+}
+addPoint=(team)=>requestCommand('addPoint',[team]);
+undoPoint=()=>requestCommand('undoPoint',[]);
+cycleServer=(team)=>requestCommand('cycleServer',[team]);
+confirmResetMatch=()=>{requestCommand('confirmResetMatch',[]);closeResetModal();};
+tagStat=(type)=>requestCommand('tagStat',[type]);
+applySettings=function(){
+ const payload={};for(const [id,key] of [['inputTeam1P1','t1p1'],['inputTeam1P2','t1p2'],['inputTeam2P1','t2p1'],['inputTeam2P2','t2p2'],['selectRule','rule'],['selectFinalSet','finalSetFormat']])payload[key]=document.getElementById(id).value;
+ payload.totalSets=Number(document.getElementById('selectSets').value);
+ requestCommand('settings',[payload]);baseSettingsToggle();
+};
+function setCourtLabel(v){requestCommand('court',[v]);}
+function statusText(text){document.getElementById('syncStatusLabel').textContent=text;document.getElementById('streamHostStatus').textContent=text;}
+function disposePeer(){clearTimeout(streamRetry);streamRetry=null;streamClients.clear();if(peer)peer.destroy();peer=null;conn=null;streamReady=false;}
+function startHostTVMode(){
+ if(streamRole==='host'&&peer&&!peer.destroyed){openStreamPanel();return;}
+ disposePeer();streamRole='host';
+ try{streamRoom=sessionStorage.getItem('padel-host-code')||'';}catch(e){}
+ if(!streamRoom){streamRoom='PADEL-'+Array.from(crypto.getRandomValues(new Uint8Array(6)),v=>v.toString(16).padStart(2,'0')).join('').toUpperCase();try{sessionStorage.setItem('padel-host-code',streamRoom);}catch(e){}}
+ peer=new Peer(streamRoom);statusText('A ligar…');
+ peer.on('open',()=>{
+  streamReady=true;statusText('Código: '+streamRoom);document.getElementById('generatedCode').textContent=streamRoom;document.getElementById('tvCodeDisplay').classList.remove('hidden');
+  const url=new URL(location.href);url.search='';url.searchParams.set('view','overlay');url.searchParams.set('room',streamRoom);document.getElementById('overlayUrl').value=url.href;
+ });
+ peer.on('connection',c=>{
+  streamClients.add(c);c.on('open',()=>sendSnapshot(c));
+  c.on('data',data=>{if(data&&data.type==='COMMAND'&&c.metadata?.role==='controller')executeCommand(data.name,data.args);if(data&&data.type==='GET_STATE')sendSnapshot(c);});
+  c.on('close',()=>streamClients.delete(c));c.on('error',()=>streamClients.delete(c));
+ });
+ peer.on('disconnected',()=>{statusText('A restabelecer ligação…');if(peer&&!peer.destroyed)peer.reconnect();});
+ peer.on('error',e=>{statusText('Erro de ligação: '+e.type);if(e.type==='unavailable-id'){try{sessionStorage.removeItem('padel-host-code');}catch(e){}peer.destroy();}});
+ openStreamPanel();
+}
+function connectAsReferee(){const code=document.getElementById('courtCodeInput').value.trim().toUpperCase();if(!code){showToast('Insira o código do campo');return;}connectStream(code,'controller');document.getElementById('syncModal').classList.add('hidden');}
+function connectionNotice(text){statusText(text);const box=document.getElementById('streamConnection');box.textContent=text;box.hidden=!text;}
+function connectStream(room,role){
+ disposePeer();streamRole=role;streamRoom=room;peer=new Peer();connectionNotice('A ligar ao marcador…');
+ function dial(){
+  if(conn&&!conn.closed)conn.close();streamReady=false;
+  conn=peer.connect(room,{reliable:true,metadata:{role}});
+  conn.on('open',()=>{clearTimeout(streamRetry);streamRetry=null;conn.send({type:'GET_STATE'});});
+  conn.on('data',data=>{
+   if(!data||data.type!=='STATE'||!Array.isArray(data.state?.setsScore))return;
+   clearTimeout(streamRetry);streamRetry=null;streamApplying=true;matchState={...data.state,audioEnabled:false};streamReady=true;updateUI();streamApplying=false;connectionNotice('');if(role==='controller')statusText('Ligado ao campo');
+  });
+  conn.on('close',retry);conn.on('error',retry);
+ }
+ function retry(){streamReady=false;connectionNotice('Ligação interrompida · a reconectar');clearTimeout(streamRetry);streamRetry=setTimeout(()=>{if(peer&&!peer.destroyed&&!peer.disconnected)dial();},2500);}
+ peer.on('open',dial);peer.on('error',retry);peer.on('disconnected',()=>{streamReady=false;connectionNotice('Sem ligação · a reconectar');if(peer&&!peer.destroyed)peer.reconnect();});
+}
+function openStreamPanel(){document.getElementById('streamPanel').hidden=false;document.getElementById('courtLabel').value=matchState.courtLabel;}
+async function copyOverlayUrl(){const input=document.getElementById('overlayUrl');if(!input.value){showToast('Ative primeiro o modo ecrã');return;}try{await navigator.clipboard.writeText(input.value);showToast('URL copiado');}catch(e){input.select();showToast('Selecione e copie o URL');}}
+function previewOverlay(){const u=document.getElementById('overlayUrl').value;if(u)window.open(u,'_blank','noopener');else showToast('Ative primeiro o modo ecrã');}
+if(overlayMode){
+ matchState.audioEnabled=false;
+ window.addEventListener('keydown',e=>e.stopImmediatePropagation(),true);
+ window.addEventListener('load',()=>{const room=streamParams.get('room');if(room)connectStream(room,'viewer');else connectionNotice('Falta código do campo no URL');});
+}
+</script>
+
 </body>
 </html>
